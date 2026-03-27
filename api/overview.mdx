@@ -1,0 +1,88 @@
+---
+title: API Overview
+description: REST API reference for the Seccion9 Secure Hub VPN management panel.
+---
+
+The Seccion9 Secure Hub API is a REST API built with FastAPI. It lets you manage WireGuard VPN clients, retrieve server diagnostics, and integrate the hub into your own tooling.
+
+## Base URL
+
+```
+http://YOUR_SERVER_IP:8443
+```
+
+Replace `YOUR_SERVER_IP` with the public IP address of your VPS.
+
+## Interactive docs
+
+Swagger UI is available at:
+
+```
+http://YOUR_SERVER_IP:8443/api/docs
+```
+
+You can authenticate and test every endpoint directly from the browser.
+
+## Authentication
+
+All endpoints except `GET /api/health` require a JWT bearer token. Obtain a token by posting credentials to `POST /api/auth/login`, then include it in every subsequent request:
+
+```
+Authorization: Bearer <token>
+```
+
+Tokens expire after **480 minutes** (8 hours) by default.
+
+<Tip>
+See the [Authentication](/api/authentication) page for a full login walkthrough with curl examples.
+</Tip>
+
+## Endpoints
+
+| Method | Path | Description | Auth required |
+|--------|------|-------------|---------------|
+| `POST` | `/api/auth/login` | Obtain a JWT access token | No |
+| `GET` | `/api/health` | Health check | No |
+| `GET` | `/api/clients` | List all VPN clients with status | Yes |
+| `POST` | `/api/clients` | Add a new VPN client | Yes |
+| `DELETE` | `/api/clients/{name}` | Remove a VPN client | Yes |
+| `GET` | `/api/clients/{name}/config` | Get the WireGuard `.conf` for a client | Yes |
+| `GET` | `/api/clients/{name}/qr` | Get the WireGuard config as a PNG QR code | Yes |
+| `GET` | `/api/clients/{name}/qr-base64` | Get the QR code as a base64-encoded PNG | Yes |
+| `GET` | `/api/server/status` | Get server and WireGuard status | Yes |
+
+## Error response format
+
+All errors return a JSON body with a `detail` field:
+
+```json
+{
+  "detail": "Human-readable error message"
+}
+```
+
+Common HTTP status codes:
+
+| Code | Meaning |
+|------|---------|
+| `400` | Bad request — invalid or duplicate client name |
+| `401` | Unauthorized — missing, expired, or invalid token |
+| `404` | Not found — client does not exist |
+| `500` | Internal server error — key generation or system failure |
+
+## Explore by topic
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    How to obtain and use a JWT token.
+  </Card>
+  <Card title="Clients" icon="users" href="/api/clients">
+    Add, remove, list, and download client configs.
+  </Card>
+  <Card title="Server status" icon="server" href="/api/server-status">
+    WireGuard service health and diagnostics.
+  </Card>
+  <Card title="Interactive docs" icon="book-open" href="http://YOUR_SERVER_IP:8443/api/docs">
+    Swagger UI — test every endpoint in the browser.
+  </Card>
+</CardGroup>

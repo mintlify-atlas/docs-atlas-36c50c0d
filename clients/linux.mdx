@@ -1,0 +1,187 @@
+---
+title: "Linux client setup"
+description: "Connect a Linux device to the Seccion9 VPN using the automated setup script or a manual wg-quick configuration."
+---
+
+## Prerequisites
+
+- A `.conf` file downloaded from the management panel, or the ability to generate one with `setup-linux.sh`
+- `sudo` access on the client machine
+- Ubuntu, Debian, or a compatible distribution (the script uses `apt`)
+
+<Note>
+  `setup-linux.sh` installs `wireguard`, `wireguard-tools`, and `resolvconf` automatically if they are not already present. On other distributions, install the equivalent packages for your package manager before following the manual method.
+</Note>
+
+## Setup methods
+
+<Tabs>
+  <Tab title="Automated script">
+    The `setup-linux.sh` script handles package installation, key generation, and config file creation in one run. The server admin must first provide you with your assigned VPN IP address.
+
+    <Steps>
+
+    <Step title="Run the script as root">
+
+    ```bash
+    sudo bash clients/setup-linux.sh
+    ```
+
+    The script checks for WireGuard and installs it if missing:
+
+    ```bash
+    apt update && apt install -y wireguard wireguard-tools resolvconf
+    ```
+
+    </Step>
+
+    <Step title="Enter your assigned VPN IP">
+
+    When prompted, enter the IP address your administrator assigned to this device (for example, `10.0.0.2`):
+
+    ```
+    Pregunta a tu administrador de SECCION9 qué IP te han asignado.
+    Introduce tu IP VPN asignada (ej: 10.0.0.2):
+    ```
+
+    </Step>
+
+    <Step title="Save your public key">
+
+    The script generates a key pair and prints the public key:
+
+    ```
+    ======================================================
+     IMPORTANTE: Envía esta clave pública a SECCION9:
+     <YOUR_PUBLIC_KEY>
+    ======================================================
+    ```
+
+    Send this public key to your Seccion9 administrator. They must register it on the server before the tunnel will connect.
+
+    The configuration file is saved to `/etc/wireguard/seccion9.conf` with `chmod 600` permissions.
+
+    </Step>
+
+    <Step title="Activate the tunnel">
+
+    Once the administrator confirms the key is registered:
+
+    ```bash
+    sudo wg-quick up seccion9
+    ```
+
+    Verify the connection:
+
+    ```bash
+    sudo wg show
+    ping 10.0.0.1
+    ```
+
+    </Step>
+
+    </Steps>
+  </Tab>
+  <Tab title="Manual">
+    Use this method if you already have a `.conf` file downloaded from the management panel.
+
+    <Steps>
+
+    <Step title="Install WireGuard">
+
+    ```bash
+    sudo apt update && sudo apt install -y wireguard wireguard-tools resolvconf
+    ```
+
+    </Step>
+
+    <Step title="Copy the config file">
+
+    Move the downloaded `.conf` file to `/etc/wireguard/` and lock down its permissions:
+
+    ```bash
+    sudo cp seccion9.conf /etc/wireguard/seccion9.conf
+    sudo chmod 600 /etc/wireguard/seccion9.conf
+    ```
+
+    </Step>
+
+    <Step title="Bring up the tunnel">
+
+    ```bash
+    sudo wg-quick up seccion9
+    ```
+
+    To stop the tunnel:
+
+    ```bash
+    sudo wg-quick down seccion9
+    ```
+
+    </Step>
+
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Enable auto-start on boot
+
+To have the VPN tunnel come up automatically after every reboot:
+
+```bash
+sudo systemctl enable wg-quick@seccion9
+```
+
+Verify the service is enabled:
+
+```bash
+sudo systemctl is-enabled wg-quick@seccion9
+# Expected output: enabled
+```
+
+## Useful commands
+
+| Command | Purpose |
+|---|---|
+| `sudo wg show` | Display active tunnels, peers, and last handshake time |
+| `sudo wg-quick up seccion9` | Start the VPN tunnel |
+| `sudo wg-quick down seccion9` | Stop the VPN tunnel |
+| `sudo journalctl -u wg-quick@seccion9 -f` | Stream live logs for the tunnel service |
+
+## Troubleshooting
+
+### Handshake does not complete
+
+If `wg show` reports no recent handshake or the connection never establishes, the most common cause is a key mismatch. WireGuard discards packets silently when the server's public key in the client config does not exactly match the registered key — no error is shown.
+
+Verify the server public key in your `.conf` matches the one on the server:
+
+```bash
+# On the server
+sudo wg show wg0 public-key
+```
+
+Compare that output character-for-character with the `PublicKey` value under `[Peer]` in `/etc/wireguard/seccion9.conf`. Keys are case-sensitive — a single character difference (for example, a lowercase `l` vs. an uppercase `L`) causes the handshake to fail silently.
+
+<Warning>
+  If your administrator reinstalled the VPN server, the server's public key will have changed. You must obtain the new key and update your `.conf` file before the tunnel will work again.
+</Warning>
+
+### Tunnel is up but no internet
+
+IP forwarding may be disabled on the server. Ask your administrator to check:
+
+```bash
+cat /proc/sys/net/ipv4/ip_forward
+# Must return 1
+```
+
+### Service shows inactive (dead) after reboot
+
+The tunnel may have been started manually but not enabled as a service. Enable it so it persists across reboots:
+
+```bash
+sudo systemctl enable wg-quick@seccion9
+sudo systemctl start wg-quick@seccion9
+sudo systemctl status wg-quick@seccion9
+```

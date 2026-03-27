@@ -1,0 +1,168 @@
+---
+title: "Windows client setup"
+description: "Connect a Windows device to the Seccion9 VPN using the PowerShell setup script or by importing a config file into the WireGuard GUI."
+---
+
+## Prerequisites
+
+- A `.conf` file downloaded from the management panel, or the ability to generate one with `setup-windows.ps1`
+- Administrator privileges on the Windows device
+- PowerShell (for the automated script method)
+
+<Note>
+  The PowerShell script downloads and installs WireGuard for Windows automatically if it is not already present. If you prefer to install it manually first, download the installer from [wireguard.com/install](https://www.wireguard.com/install/).
+</Note>
+
+## Setup methods
+
+<Tabs>
+  <Tab title="PowerShell script">
+    The `setup-windows.ps1` script installs WireGuard if needed, generates a key pair, writes the configuration file, and opens the WireGuard GUI — all in a single run.
+
+    <Steps>
+
+    <Step title="Open PowerShell as Administrator">
+
+    Right-click the Start menu and select **Windows PowerShell (Admin)** or **Terminal (Admin)**.
+
+    </Step>
+
+    <Step title="Run the script">
+
+    Pass your assigned VPN IP address with the `-ClientAddress` parameter:
+
+    ```powershell
+    .\clients\setup-windows.ps1 -ClientAddress "10.0.0.2"
+    ```
+
+    **Script parameters:**
+
+    | Parameter | Default | Description |
+    |---|---|---|
+    | `-ClientAddress` | *(prompts if omitted)* | Your assigned VPN IP (e.g. `10.0.0.2`) |
+    | `-ServerPublicKey` | `TU_CLAVE_PUBLICA_SERVIDOR` | Server public key (pre-filled by your admin) |
+    | `-ServerEndpoint` | `TU_IP_VPS:51820` | Server IP and port (pre-filled by your admin) |
+    | `-TunnelName` | `tunnel-seccion9` | Name used for the tunnel and config file |
+
+    If `-ClientAddress` is omitted, the script prompts you to enter it interactively.
+
+    </Step>
+
+    <Step title="Install WireGuard (if not already installed)">
+
+    When WireGuard is not found at `C:\Program Files\WireGuard\wg.exe`, the script downloads and installs it silently:
+
+    ```powershell
+    Invoke-WebRequest -Uri "https://download.wireguard.com/windows-client/wireguard-amd64-0.5.3.msi" -OutFile $installer
+    Start-Process msiexec -ArgumentList "/i $installer /quiet" -Wait
+    ```
+
+    </Step>
+
+    <Step title="Save your public key">
+
+    The script generates a key pair and prints the public key:
+
+    ```
+    ======================================================
+     IMPORTANTE: Envia esta clave publica a SECCION9:
+     <YOUR_PUBLIC_KEY>
+    ======================================================
+    ```
+
+    Send this public key to your Seccion9 administrator. They must register it on the server before the tunnel will connect.
+
+    The configuration file is saved to `C:\Program Files\WireGuard\tunnel-seccion9.conf`.
+
+    </Step>
+
+    <Step title="Activate the tunnel in the GUI">
+
+    The script opens the WireGuard GUI automatically. In the GUI:
+
+    1. Click **Import tunnel(s) from file** if the tunnel is not listed yet
+    2. Select `C:\Program Files\WireGuard\tunnel-seccion9.conf`
+    3. Click **Activate**
+
+    </Step>
+
+    </Steps>
+  </Tab>
+  <Tab title="GUI import">
+    Use this method if you already have a `.conf` file downloaded from the management panel.
+
+    <Steps>
+
+    <Step title="Install WireGuard for Windows">
+
+    Download and run the installer from [wireguard.com/install](https://www.wireguard.com/install/).
+
+    </Step>
+
+    <Step title="Import the tunnel">
+
+    Open the WireGuard application, click the down-arrow next to **Add Tunnel**, and select **Import tunnel(s) from file**. Choose your `.conf` file.
+
+    </Step>
+
+    <Step title="Activate">
+
+    Select the imported tunnel and click **Activate**.
+
+    </Step>
+
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Installing the tunnel as a Windows service
+
+To have the VPN connect automatically at system startup (before any user logs in), install the tunnel as a Windows service:
+
+```cmd
+wireguard.exe /installtunnelservice "C:\Program Files\WireGuard\tunnel-seccion9.conf"
+```
+
+To remove the service:
+
+```cmd
+wireguard.exe /uninstalltunnelservice tunnel-seccion9
+```
+
+<Tip>
+  Running the tunnel as a service is recommended for devices that need persistent VPN access regardless of which user is logged in, such as managed workstations or servers.
+</Tip>
+
+## Troubleshooting
+
+### `wg-quick` does not exist on Windows
+
+`wg-quick` is a Linux/macOS shell wrapper and is not available on Windows. Use the WireGuard GUI or install the tunnel as a service instead:
+
+```cmd
+:: Option A — install as a service
+wireguard.exe /installtunnelservice "C:\Program Files\WireGuard\tunnel-seccion9.conf"
+
+:: Option B — use the GUI
+wireguard.exe
+```
+
+### SSH warning: REMOTE HOST IDENTIFICATION HAS CHANGED
+
+If your administrator reinstalled the VPN server, SSH will refuse to connect with this warning. Clear the old host key for that IP:
+
+```cmd
+ssh-keygen -R IP_DEL_SERVIDOR
+```
+
+Then reconnect with `ssh user@IP` and accept the new fingerprint.
+
+### Handshake does not complete
+
+If the tunnel activates but traffic does not flow, check the server's public key in your `.conf` file. WireGuard discards packets silently on a key mismatch — no error appears in the GUI.
+
+Open your `.conf` file and compare the `PublicKey` value under `[Peer]` with the key printed by `sudo wg show wg0 public-key` on the server. Keys are case-sensitive.
+
+<Warning>
+  If the server was reinstalled, its public key will have changed. You must obtain the new `.conf` from the management panel or update the `PublicKey` field manually before the tunnel will work again.
+</Warning>

@@ -1,0 +1,104 @@
+---
+title: Authentication
+description: How to obtain a JWT token and authenticate requests to the Seccion9 API.
+---
+
+The Seccion9 API uses JWT bearer tokens for authentication. You must log in once to obtain a token, then include that token in every subsequent request.
+
+## Login
+
+<Steps>
+  <Step title="Send login credentials">
+    POST to `/api/auth/login` with your admin username and password as form data.
+
+    <CodeGroup>
+
+    ```bash curl
+    curl --request POST \
+      --url http://YOUR_SERVER_IP:8443/api/auth/login \
+      --header 'Content-Type: application/x-www-form-urlencoded' \
+      --data 'username=admin&password=YOUR_PASSWORD'
+    ```
+
+    </CodeGroup>
+
+    **Request parameters** (form data, not JSON):
+
+    <ParamField body="username" type="string" required>
+      The admin username. Defaults to `admin` unless overridden in your deployment configuration.
+    </ParamField>
+
+    <ParamField body="password" type="string" required>
+      The admin password set via the `ADMIN_PASSWORD` environment variable.
+    </ParamField>
+
+    **Successful response** (`200 OK`):
+
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "token_type": "bearer"
+    }
+    ```
+
+    <ResponseField name="access_token" type="string" required>
+      The JWT token to use in subsequent requests.
+    </ResponseField>
+
+    <ResponseField name="token_type" type="string" required>
+      Always `"bearer"`.
+    </ResponseField>
+  </Step>
+
+  <Step title="Store the token">
+    Copy the value of `access_token` from the response. You will pass it as a header in every authenticated request.
+  </Step>
+
+  <Step title="Use the token in requests">
+    Add the `Authorization` header to every subsequent API call:
+
+    ```
+    Authorization: Bearer <access_token>
+    ```
+
+    Example — listing clients using the token:
+
+    <CodeGroup>
+
+    ```bash curl
+    curl --request GET \
+      --url http://YOUR_SERVER_IP:8443/api/clients \
+      --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Token expiry
+
+Tokens are valid for **480 minutes (8 hours)** by default. After expiry, all protected endpoints return `401 Unauthorized`.
+
+<Note>
+The expiry duration is controlled by the `ACCESS_TOKEN_EXPIRE_MINUTES` environment variable in your deployment. Contact your administrator if you need a different session length.
+</Note>
+
+## Handling 401 errors
+
+A `401 Unauthorized` response means one of the following:
+
+- The `Authorization` header is missing from the request.
+- The token has expired (after 480 minutes).
+- The token value is malformed or was signed with a different secret key.
+
+```json
+{
+  "detail": "Token inválido o expirado"
+}
+```
+
+To recover, repeat the login step to obtain a fresh token and retry your request.
+
+<Warning>
+Do not share your token. It grants full API access for its entire lifetime. If a token is compromised, restart the API service to invalidate all outstanding tokens.
+</Warning>

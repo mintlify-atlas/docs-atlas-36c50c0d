@@ -1,0 +1,191 @@
+---
+title: "Server installation"
+description: "Install WireGuard and configure the Seccion9 VPN server on Ubuntu 22.04 LTS using the automated install script."
+---
+
+The `install-server.sh` script automates every step of WireGuard installation: package setup, key generation, tunnel configuration, IP forwarding, and firewall rules — getting the server ready in a single run.
+
+## Prerequisites
+
+Before running the script, confirm the following:
+
+- **OS:** Ubuntu 22.04 LTS
+- **Access:** Root (or `sudo`) access over SSH
+- **Open ports** in your cloud provider's external firewall panel:
+
+| Protocol | Port | Purpose |
+|---|---|---|
+| UDP | 51820 | WireGuard VPN tunnel |
+| TCP | 8443 | Web management panel |
+| TCP | 22 | SSH access |
+
+<Warning>
+  Many cloud providers (Ionos, OVH, Hetzner, AWS) apply an external firewall that blocks traffic **before it reaches the OS**. Opening ports in UFW alone is not sufficient — you must also open them in your provider's network control panel. See [Firewall configuration](/server/firewall) for provider-specific instructions.
+</Warning>
+
+## Run the install script
+
+SSH into your VPS as root and run:
+
+```bash
+sudo bash server/install-server.sh
+```
+
+The script detects your default network interface automatically:
+
+```bash
+INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+```
+
+This value is used when writing the `PostUp`/`PostDown` iptables rules in `wg0.conf`.
+
+## What the script does
+
+<Steps>
+
+<Step title="Install WireGuard packages">
+
+Updates the package list and installs the three required packages:
+
+```bash
+apt update && apt install -y wireguard wireguard-tools ufw
+```
+
+</Step>
+
+<Step title="Generate server key pair">
+
+Creates `/etc/wireguard/` with restrictive permissions, generates a private key, derives the public key from it, and locks down the private key file:
+
+```bash
+mkdir -p /etc/wireguard && chmod 700 /etc/wireguard
+wg genkey | tee /etc/wireguard/server_private.key | wg pubkey > /etc/wireguard/server_public.key
+chmod 600 /etc/wireguard/server_private.key
+```
+
+</Step>
+
+<Step title="Create /etc/wireguard/wg0.conf">
+
+Writes the server configuration file with:
+
+- VPN address `10.0.0.1/24`
+- Listen port `51820`
+- The generated private key
+- `PostUp`/`PostDown` iptables rules for NAT using the detected interface
+
+```bash
+chmod 600 /etc/wireguard/wg0.conf
+```
+
+See [Server configuration](/server/configuration) for a full breakdown of each parameter.
+
+</Step>
+
+<Step title="Enable IP forwarding">
+
+Appends the forwarding directive to `/etc/sysctl.conf` and applies it immediately:
+
+```bash
+echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+sysctl -p
+```
+
+This setting is required for the VPN server to route packets between peers and the internet.
+
+</Step>
+
+<Step title="Configure UFW and start WireGuard">
+
+Opens the required ports in UFW, enables the firewall, then enables and starts the WireGuard systemd service:
+
+```bash
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 51820/udp
+ufw --force enable
+systemctl enable wg-quick@wg0
+systemctl start wg-quick@wg0
+```
+
+</Step>
+
+</Steps>
+
+## Post-installation checklist
+
+When the script finishes, it prints the server public key and a summary:
+
+```
+============================================
+   INSTALACION COMPLETADA
+============================================
+
+ Clave publica del servidor:
+ <YOUR_SERVER_PUBLIC_KEY>
+
+ IMPORTANTE:
+ 1. Guarda esta clave publica — la necesitan los clientes
+ 2. Abre el puerto UDP 51820 en el firewall del proveedor (Ionos, etc.)
+ 3. Usa add-client.sh para registrar nuevos clientes
+```
+
+Complete these steps before moving on:
+
+<Steps>
+
+<Step title="Save the server public key">
+
+Copy the public key printed by the script. You will need it when:
+
+- Configuring the management panel (`SERVER_PUBLIC_KEY` environment variable)
+- Setting up client configuration files
+- Running `wg-manager.sh`
+
+If you missed it, retrieve the key at any time:
+
+```bash
+cat /etc/wireguard/server_public.key
+# or
+sudo wg show wg0 public-key
+```
+
+</Step>
+
+<Step title="Verify the WireGuard interface is running">
+
+```bash
+sudo wg show
+```
+
+Expected output shows the interface, public key, listen port, and an empty peer list:
+
+```
+interface: wg0
+  public key: <SERVER_PUBLIC_KEY>
+  private key: (hidden)
+  listening port: 51820
+```
+
+If the interface is not listed, check the systemd service status:
+
+```bash
+sudo systemctl status wg-quick@wg0
+```
+
+</Step>
+
+<Step title="Open ports in your cloud provider's firewall">
+
+UFW is now configured, but your cloud provider's external firewall may still block traffic. Open UDP 51820 and TCP 8443 in your provider's network control panel before clients attempt to connect.
+
+See [Firewall configuration](/server/firewall) for step-by-step instructions for Ionos and other providers.
+
+</Step>
+
+</Steps>
+
+<Tip>
+  After saving the public key and verifying `wg show`, the next step is to deploy the management panel. See the [Quickstart](/quickstart) for the full setup sequence.
+</Tip>

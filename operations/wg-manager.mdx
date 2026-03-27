@@ -1,0 +1,180 @@
+---
+title: WireGuard Manager (wg-manager.sh)
+description: Manage VPN clients from the terminal over SSH using the interactive wg-manager.sh script — the same features as the web panel without a browser.
+---
+
+`wg-manager.sh` is an interactive terminal tool that provides the same client management features as the web panel: add clients, remove clients, list connection status, view configurations, and inspect server health. Use it when you need to administer the VPN directly over SSH without accessing the web panel.
+
+## When to use wg-manager.sh vs. the web panel
+
+| Situation | Recommended tool |
+|---|---|
+| Day-to-day client management | Web panel (`http://YOUR_IP:8443`) |
+| SSH-only access to the server | `wg-manager.sh` |
+| Panel is down or Docker is not running | `wg-manager.sh` |
+| Quick server status check from terminal | `wg-manager.sh` |
+| QR code generation for mobile clients | Web panel only |
+
+## Setup
+
+<Steps>
+  <Step title="Copy the script to the server">
+    Transfer `wg-manager.sh` from your local machine to the VPS:
+
+    ```bash
+    scp wg-manager.sh root@YOUR_VPS_IP:/root/wg-manager.sh
+    ```
+  </Step>
+  <Step title="Make the script executable">
+    ```bash
+    chmod +x /root/wg-manager.sh
+    ```
+  </Step>
+  <Step title="Configure server variables">
+    Open the script and set the two required variables at the top:
+
+    ```bash
+    nano /root/wg-manager.sh
+    ```
+
+    Find the configuration block and replace the placeholder values:
+
+    ```bash
+    # === CONFIGURACIÓN — EDITAR ANTES DE USAR ===
+    WG_CONF="/etc/wireguard/wg0.conf"
+    WG_IFACE="wg0"
+    SERVER_IP="TU_IP_PUBLICA_VPS"       # ← replace with your VPS public IP
+    SERVER_PORT="51820"
+    SERVER_PUBKEY="TU_CLAVE_PUBLICA_SERVIDOR"  # ← replace with your server public key
+    VPN_SUBNET="10.0.0"
+    CONFIGS_DIR="/etc/wireguard/clientes"
+    LOG_FILE="/var/log/seccion9-vpn.log"
+    ```
+
+    To find your server's public key:
+
+    ```bash
+    sudo wg show wg0 public-key
+    # or
+    cat /etc/wireguard/server_public.key
+    ```
+
+    <Warning>
+      The script refuses to start if `SERVER_IP` or `SERVER_PUBKEY` still contain the placeholder values. It will print an error and exit.
+    </Warning>
+  </Step>
+  <Step title="Run the script">
+    ```bash
+    sudo ./wg-manager.sh
+    ```
+
+    The script requires root privileges. It also verifies that WireGuard is installed and that `wg0.conf` exists before showing the menu.
+  </Step>
+</Steps>
+
+## The interactive menu
+
+After startup checks pass, you see the main menu:
+
+```
+╔══════════════════════════════════════╗
+║   SECCION9 — WireGuard Manager      ║
+╠══════════════════════════════════════╣
+║  1) Añadir cliente                   ║
+║  2) Eliminar cliente                 ║
+║  3) Listar clientes y estado         ║
+║  4) Ver config de un cliente         ║
+║  5) Estado del servidor              ║
+║  6) Salir                            ║
+╚══════════════════════════════════════╝
+
+  Opción:
+```
+
+Enter the number for the operation you want. The menu loops after each action until you choose **6) Salir**.
+
+## Menu options
+
+### 1) Add a client
+
+Prompts for a client name, then automatically:
+
+- Generates a WireGuard private/public key pair with `wg genkey` / `wg pubkey`
+- Assigns the next available IP address in `10.0.0.0/24` (starting from `.2`)
+- Appends the peer block to `/etc/wireguard/wg0.conf`
+- Applies the peer to the live interface with `wg set` — no tunnel restart required
+- Saves a complete `.conf` file to `/etc/wireguard/clientes/<name>.conf`
+- Logs the action to `/var/log/seccion9-vpn.log`
+- Prints the full client `.conf` content to the terminal
+
+```
+Nombre del cliente (ej: moham, oficina-bcn): oficina-bcn
+```
+
+The generated `.conf` file includes the server's public key and endpoint from the variables you configured. Send this file to the client:
+
+- **Windows** — Import the `.conf` file in the WireGuard GUI (**Import tunnel from file**)
+- **Linux** — Copy the file to `/etc/wireguard/` and run `sudo wg-quick up seccion9`
+
+<Note>
+  Client names are sanitized automatically: spaces become underscores and special characters are stripped. Duplicate names are rejected.
+</Note>
+
+### 2) Remove a client
+
+Lists existing clients, then prompts for the name of the client to remove. Requires confirmation by typing `si`.
+
+When confirmed, the script:
+
+- Reads the client's public key from `wg0.conf`
+- Removes the peer block from `wg0.conf`
+- Removes the peer from the live interface with `wg set ... remove` — revocation is immediate
+- Deletes `/etc/wireguard/clientes/<name>.conf`
+- Logs the action to `/var/log/seccion9-vpn.log`
+
+<Warning>
+  Removal is immediate and cannot be undone. The client's active VPN session is dropped at once. Re-adding the client generates new keys and a new IP.
+</Warning>
+
+### 3) List clients and status
+
+Displays all registered clients in a table with their assigned IP and current connection status:
+
+```
+  NOMBRE               IP              ESTADO
+  ────────────────────────────────────────────────────
+  oficina-bcn          10.0.0.2        ● Conectado (hace 42s)
+  laptop-ana           10.0.0.3        ○ Inactivo (hace 8min)
+  test-device          10.0.0.4        ○ Sin conexión
+```
+
+Status is determined from the WireGuard last-handshake timestamp:
+
+| Status | Condition |
+|---|---|
+| **Conectado** (green) | Last handshake within the past 3 minutes |
+| **Inactivo** (yellow) | Handshake recorded but older than 3 minutes |
+| **Sin conexión** (red) | No handshake ever recorded |
+
+### 4) View a client's config
+
+Prompts for a client name and prints the full contents of `/etc/wireguard/clientes/<name>.conf` to the terminal.
+
+<Note>
+  This only works for clients created with this script or the web panel. Clients added manually to `wg0.conf` without a corresponding `.conf` file in `CONFIGS_DIR` will not be found.
+</Note>
+
+### 5) Server status
+
+Displays a full server diagnostic summary:
+
+- Public IP, port, public key, interface, and VPN subnet (from script variables)
+- `wg-quick@wg0` systemd service state (active / inactive)
+- IP forwarding status from `/proc/sys/net/ipv4/ip_forward`
+- UFW rule for `51820/udp` (present / not found)
+- Total number of registered peers
+- Full output of `wg show`
+
+### 6) Exit
+
+Exits the script cleanly.

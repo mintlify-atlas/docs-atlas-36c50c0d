@@ -1,97 +1,52 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Seccion9 Secure Hub"
+description: "Self-hosted enterprise VPN platform built on WireGuard and OpenVPN — Zero Trust remote access with a web management panel and REST API."
 ---
 
-## Setting up
+Seccion9 Secure Hub is a complete enterprise VPN solution that combines WireGuard and OpenVPN protocols with a web-based management panel, a REST API, and automated client setup scripts. Deploy it on any Ubuntu VPS to give your team secure, Zero Trust remote access in minutes.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Install the VPN server and connect your first client in under 10 minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Management Panel" icon="display" href="/panel/overview">
+    Manage clients, download configs, and monitor status from a browser-based dashboard.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Integrate VPN management into your workflows with the full REST API.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Troubleshooting" icon="wrench" href="/operations/troubleshooting">
+    Diagnose and fix common issues including handshake failures and firewall blocks.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+Seccion9 runs a WireGuard gateway on your VPS. Clients tunnel through it to reach internal resources, with all traffic encrypted end-to-end. A FastAPI backend and React frontend let you manage peers without touching the command line.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<Steps>
+  <Step title="Install the server">
+    Run `sudo bash server/install-server.sh` on your Ubuntu 22.04 VPS to install WireGuard, generate server keys, configure UFW, and start the `wg0` interface.
+  </Step>
+  <Step title="Deploy the management panel">
+    Configure `panel/docker-compose.yml` with your credentials and public IP, then run `sudo bash panel/deploy.sh`. The dashboard is accessible at `http://YOUR_IP:8443`.
+  </Step>
+  <Step title="Add a client">
+    From the panel, click **Add client**, enter a name, and download the generated `.conf` file or scan the QR code on mobile.
+  </Step>
+  <Step title="Connect">
+    Import the `.conf` into the WireGuard app on Windows, Linux, macOS, or iOS/Android and toggle the tunnel on.
+  </Step>
+</Steps>
 
-## Need inspiration?
+## Choose your protocol
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+| Client firewall | Recommended protocol |
+|---|---|
+| pfSense / OPNsense / MikroTik | WireGuard (UDP 51820) |
+| Cisco ASA / Fortinet / SonicWall | OpenVPN (TCP 443) |
+| No corporate firewall (cloud) | WireGuard (UDP 51820) |
+
+<Note>
+  Many cloud providers (Ionos, OVH, Hetzner) have an **external firewall** independent of UFW. You must open UDP 51820 and TCP 8443 in your provider's network policy before clients can connect. See [Firewall configuration](/server/firewall) for details.
+</Note>

@@ -1,0 +1,233 @@
+---
+title: Deploying the panel
+description: Step-by-step guide to configure and deploy the Seccion9 Management Panel using Docker Compose.
+---
+
+## Prerequisites
+
+- Docker installed on the host (the deploy script installs it automatically if missing)
+- Docker Compose plugin (`docker compose` v2 CLI)
+- WireGuard already configured and running on the host (`wg0` interface active)
+- Root or `sudo` access
+
+<Note>
+  The deploy script checks for Docker and installs it via `curl -fsSL https://get.docker.com | sh` if not found. If Docker Compose is missing, it exits with an error and asks you to run `apt install docker-compose-plugin`.
+</Note>
+
+## Step 1: Configure docker-compose.yml
+
+Before deploying, edit `panel/docker-compose.yml` and set all required values. The deploy script will refuse to start if any field still contains the default placeholder `CAMBIAME`.
+
+```yaml panel/docker-compose.yml
+services:
+  backend:
+    build: ./backend
+    container_name: seccion9-api
+    restart: always
+    network_mode: host
+    volumes:
+      - /etc/wireguard:/etc/wireguard
+      - /var/log/seccion9:/var/log/seccion9
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=CAMBIAME
+      - SECRET_KEY=CAMBIAME
+      - SERVER_PUBLIC_IP=TU_IP_PUBLICA
+      - SERVER_PUBLIC_KEY=TU_CLAVE_PUBLICA_SERVIDOR
+      - SERVER_PORT=51820
+      - WG_INTERFACE=wg0
+      - WG_CONF_PATH=/etc/wireguard/wg0.conf
+      - VPN_SUBNET=10.0.0
+      - CONFIGS_DIR=/etc/wireguard/clientes
+    cap_add:
+      - NET_ADMIN
+    privileged: true
+
+  frontend:
+    build: ./frontend
+    container_name: seccion9-web
+    restart: always
+    ports:
+      - "8443:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend
+```
+
+### Environment variables
+
+<AccordionGroup>
+  <Accordion title="API_HOST and API_PORT" defaultOpen={true}>
+    Controls the address and port the FastAPI server binds to inside the container.
+
+    | Variable | Default | Description |
+    |---|---|---|
+    | `API_HOST` | `0.0.0.0` | Bind address for uvicorn. Keep `0.0.0.0` when using `network_mode: host`. |
+    | `API_PORT` | `8000` | Port the backend listens on. nginx proxies `/api/*` to this port on `172.17.0.1`. |
+  </Accordion>
+
+  <Accordion title="ADMIN_USER and ADMIN_PASSWORD">
+    Credentials for the panel web login.
+
+    | Variable | Default | Description |
+    |---|---|---|
+    | `ADMIN_USER` | `admin` | Username for the admin account. |
+    | `ADMIN_PASSWORD` | `CAMBIAME` | Password for the admin account. **Must be changed before deploying.** |
+
+    <Warning>
+      The deploy script (`deploy.sh`) will exit with an error if `ADMIN_PASSWORD` still contains `CAMBIAME`. You must set a strong password before running the script.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="SECRET_KEY">
+    The key used to sign JWT authentication tokens.
+
+    | Variable | Default | Description |
+    |---|---|---|
+    | `SECRET_KEY` | `CAMBIAME` | JWT signing secret. **Must be changed before deploying.** |
+
+    Use a long random string. You can generate one with:
+
+    ```bash
+    openssl rand -hex 32
+    ```
+
+    <Warning>
+      The deploy script exits if `SECRET_KEY` still contains `CAMBIAME`. Changing it invalidates all existing sessions.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="SERVER_PUBLIC_IP">
+    | Variable | Default | Description |
+    |---|---|---|
+    | `SERVER_PUBLIC_IP` | `TU_IP_PUBLICA` | The public IP of the VPS. Used in generated client `.conf` files as the `Endpoint`. |
+
+    Find your public IP with:
+
+    ```bash
+    curl -s ifconfig.me
+    ```
+  </Accordion>
+
+  <Accordion title="SERVER_PUBLIC_KEY">
+    | Variable | Default | Description |
+    |---|---|---|
+    | `SERVER_PUBLIC_KEY` | `TU_CLAVE_PUBLICA_SERVIDOR` | The WireGuard server's public key. Inserted into client `.conf` files as `PublicKey`. |
+
+    Retrieve the key from the running WireGuard interface:
+
+    ```bash
+    sudo wg show wg0 public-key
+    ```
+  </Accordion>
+
+  <Accordion title="SERVER_PORT">
+    | Variable | Default | Description |
+    |---|---|---|
+    | `SERVER_PORT` | `51820` | UDP port WireGuard listens on. Inserted into client `.conf` files as the `Endpoint` port. |
+  </Accordion>
+
+  <Accordion title="WG_INTERFACE and WG_CONF_PATH">
+    | Variable | Default | Description |
+    |---|---|---|
+    | `WG_INTERFACE` | `wg0` | Name of the WireGuard network interface on the host. |
+    | `WG_CONF_PATH` | `/etc/wireguard/wg0.conf` | Absolute path to the WireGuard server configuration file. |
+  </Accordion>
+
+  <Accordion title="VPN_SUBNET and CONFIGS_DIR">
+    | Variable | Default | Description |
+    |---|---|---|
+    | `VPN_SUBNET` | `10.0.0` | The first three octets of the VPN address space. Clients are assigned IPs in `10.0.0.0/24`, starting from `.2`. |
+    | `CONFIGS_DIR` | `/etc/wireguard/clientes` | Directory where per-client `.conf` files are stored on the host. |
+  </Accordion>
+</AccordionGroup>
+
+## Step 2: Why NET_ADMIN and privileged are required
+
+The backend container runs `wg` and `wg-quick` commands directly against the host's network stack to add and remove peers in real time. This requires:
+
+- `cap_add: NET_ADMIN` — grants the container the Linux `CAP_NET_ADMIN` capability, which is needed to modify network interfaces.
+- `privileged: true` — required to run `wg syncconf` and write to `/proc/sys/net/ipv4/ip_forward`.
+
+The `/etc/wireguard` volume mount gives the container read/write access to `wg0.conf` and the `clientes/` directory.
+
+## Step 3: Deploy
+
+<Steps>
+  <Step title="Navigate to the panel directory">
+    ```bash
+    cd panel/
+    ```
+  </Step>
+  <Step title="Edit the configuration">
+    ```bash
+    nano docker-compose.yml
+    ```
+    Set `ADMIN_PASSWORD`, `SECRET_KEY`, `SERVER_PUBLIC_IP`, and `SERVER_PUBLIC_KEY` to real values.
+  </Step>
+  <Step title="Run the deploy script as root">
+    ```bash
+    sudo bash deploy.sh
+    ```
+
+    The script will:
+    1. Verify Docker and Docker Compose are available (installs Docker if missing)
+    2. Check that `CAMBIAME` has been replaced in `docker-compose.yml`
+    3. Create `/var/log/seccion9`, `/etc/wireguard/clientes`, and `nginx/certs` directories
+    4. Open ports 80 and 443 in UFW if UFW is active
+    5. Build the containers with `docker compose build --no-cache`
+    6. Start the services with `docker compose up -d`
+  </Step>
+  <Step title="Verify the deployment">
+    Open `http://YOUR_IP:8443` in a browser. You should see the SECCION9 VPN Manager login screen.
+
+    Check the API health endpoint:
+
+    ```bash
+    curl http://localhost:8000/api/health
+    ```
+
+    Expected response:
+
+    ```json
+    {"status": "ok", "service": "seccion9-vpn-api"}
+    ```
+  </Step>
+</Steps>
+
+## Managing the containers
+
+<CodeGroup>
+
+```bash Check status
+sudo docker compose ps
+```
+
+```bash View logs
+# Backend API logs
+sudo docker logs seccion9-api --tail 50 -f
+
+# Frontend / nginx logs
+sudo docker logs seccion9-web --tail 50 -f
+```
+
+```bash Restart services
+cd panel/ && sudo docker compose restart
+```
+
+```bash Stop services
+cd panel/ && sudo docker compose down
+```
+
+```bash Rebuild after config change
+cd panel/ && sudo docker compose build --no-cache && sudo docker compose up -d
+```
+
+</CodeGroup>
+
+<Note>
+  The panel port is `8443`. If your cloud provider (Ionos, OVH, Hetzner, etc.) has an external firewall separate from UFW, you must open TCP port `8443` from the provider's control panel.
+</Note>

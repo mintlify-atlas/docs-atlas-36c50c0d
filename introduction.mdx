@@ -1,0 +1,112 @@
+---
+title: "Introduction"
+description: "Seccion9 Secure Hub is a self-hosted enterprise VPN platform built on WireGuard and OpenVPN — Zero Trust remote access with a web management panel and REST API."
+---
+
+Seccion9 Secure Hub is a complete, self-hosted VPN solution for enterprises. It combines WireGuard and OpenVPN protocols with a browser-based management panel, a full REST API, and automated client setup scripts. Deploy it on any Ubuntu 22.04 VPS to give your team encrypted, Zero Trust remote access in minutes — without any third-party VPN providers.
+
+## Architecture
+
+All client devices tunnel through a central VPS gateway. Traffic passes through a firewall to reach internal IT resources, and optionally through a WAF to protect web-facing services.
+
+```
+[Laptop 1] ──┐
+[Laptop 2] ──┼── WireGuard/OpenVPN tunnel ──► [VPS/VPN Gateway]
+[Laptop 3] ──┘                                       │
+                                          ┌───────────┴───────────┐
+                                          │                       │
+                                     [Firewall]               [WAF]
+                                          │                       │
+                                     [IT Server]           [Web Server]
+```
+
+## Key components
+
+| Component | Description |
+|---|---|
+| VPS Gateway | Central VPN concentrator. Runs WireGuard on UDP 51820 and OpenVPN on TCP 443. |
+| Client firewall | pfSense / OPNsense / Cisco / Fortinet — varies by client environment. |
+| WAF | Nginx + ModSecurity + OWASP CRS. Protects web-facing services. |
+| IT server | Internal resources accessible to authenticated VPN clients. |
+
+## Protocol selection guide
+
+Choose your VPN protocol based on the firewall your clients sit behind.
+
+| Client firewall | Recommended protocol |
+|---|---|
+| pfSense / OPNsense / MikroTik | WireGuard (UDP 51820) |
+| Cisco ASA / Fortinet / SonicWall | OpenVPN (TCP 443) |
+| No corporate firewall (cloud) | WireGuard (UDP 51820) |
+
+<Note>
+  Corporate firewalls from Cisco, Fortinet, and SonicWall typically block non-standard UDP traffic. Using OpenVPN over TCP 443 lets VPN traffic blend with standard HTTPS, bypassing those restrictions.
+</Note>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Web management panel" icon="display">
+    A React + FastAPI dashboard lets you add and remove clients, download `.conf` files, and scan QR codes — no terminal required.
+  </Card>
+  <Card title="Dual-protocol support" icon="shield">
+    Run WireGuard and OpenVPN side by side on the same gateway. Assign each client the protocol that matches their network environment.
+  </Card>
+  <Card title="Automatic key generation" icon="key">
+    The panel and setup scripts generate WireGuard key pairs automatically. Public keys are registered on the server; private keys never leave the client.
+  </Card>
+  <Card title="Real-time peer status" icon="chart-line">
+    The dashboard shows each peer's assigned IP, connection state (connected / idle / offline), and last handshake timestamp.
+  </Card>
+  <Card title="REST API" icon="code">
+    Every panel action is available as a JWT-authenticated REST endpoint. Integrate VPN management into your existing workflows and automation.
+  </Card>
+  <Card title="QR code provisioning" icon="qr-code">
+    Generate a QR code for any client config directly from the panel. Mobile users can scan it to connect without touching a config file.
+  </Card>
+  <Card title="Terminal management" icon="terminal">
+    The `wg-manager.sh` interactive script provides the same capabilities as the panel over SSH — useful for headless servers or air-gapped environments.
+  </Card>
+  <Card title="Zero Trust model" icon="lock">
+    Every peer is identified by its public key. Access is revoked immediately when a client is removed — no certificates to rotate or sessions to kill.
+  </Card>
+</CardGroup>
+
+## Repository structure
+
+```
+├── wg-manager.sh                   # Interactive terminal client manager
+├── server/
+│   ├── install-server.sh           # Installs WireGuard on the VPS
+│   └── wg0.conf.example            # Server configuration template
+├── clients/
+│   ├── setup-windows.ps1           # Automated Windows client setup
+│   ├── setup-linux.sh              # Automated Linux client setup
+│   └── client.conf.example         # Client configuration template
+├── onboarding/
+│   └── add-client.sh               # Registers a new peer manually
+├── panel/                          # Web management panel
+│   ├── docker-compose.yml          # Service orchestration
+│   ├── deploy.sh                   # Deployment script
+│   ├── backend/                    # REST API (FastAPI + Python)
+│   └── frontend/                   # Dashboard (React)
+└── docs/
+    └── troubleshooting.md          # Known issues and solutions
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install the server, deploy the panel, and connect your first client.
+  </Card>
+  <Card title="Management panel" icon="display" href="/panel/overview">
+    Explore the full capabilities of the web dashboard and REST API.
+  </Card>
+  <Card title="Client setup" icon="laptop" href="/clients/overview">
+    Detailed setup guides for Linux and Windows clients.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/operations/troubleshooting">
+    Diagnose handshake failures, firewall blocks, and other common issues.
+  </Card>
+</CardGroup>

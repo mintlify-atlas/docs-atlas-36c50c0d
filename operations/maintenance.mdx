@@ -1,0 +1,129 @@
+---
+title: Maintenance
+description: Routine commands for monitoring, restarting, and maintaining the Seccion9 VPN server and management panel.
+---
+
+This page collects the day-to-day commands you need to keep the VPN server and panel running smoothly.
+
+## WireGuard tunnel
+
+### View connected peers
+
+```bash
+sudo wg show
+```
+
+Outputs the server's public key, listening port, and for each peer: its public key, allowed IPs, latest handshake timestamp, and transferred data. Use this to verify which clients are actively connected.
+
+### Restart the tunnel
+
+```bash
+sudo wg-quick down wg0 && sudo wg-quick up wg0
+```
+
+This tears down and re-establishes the `wg0` interface, re-reads `wg0.conf`, and re-applies all peer rules. All active client connections are temporarily dropped.
+
+<Warning>
+  Restarting the tunnel drops all active VPN sessions. Use this only when a configuration change requires a full reload. To add or remove a single peer without downtime, use `wg set` directly or the web panel / `wg-manager.sh`.
+</Warning>
+
+### Stream live logs
+
+```bash
+sudo journalctl -u wg-quick@wg0 -f
+```
+
+Streams the systemd journal for the `wg-quick@wg0` service in real time. Press `Ctrl+C` to stop.
+
+### Remove a client manually
+
+If you need to revoke a client's access without using the panel or `wg-manager.sh`:
+
+```bash
+# Remove the peer from the live interface
+sudo wg set wg0 peer <PUBLIC_KEY> remove
+
+# Persist the change to wg0.conf
+sudo wg-quick save wg0
+```
+
+Replace `<PUBLIC_KEY>` with the client's WireGuard public key. You can find it with `sudo wg show`.
+
+<Note>
+  `wg-quick save wg0` overwrites `wg0.conf` with the current in-memory state of the interface. Run it immediately after `wg set` to ensure the change survives a reboot.
+</Note>
+
+## Systemd service management
+
+The WireGuard tunnel is managed as a systemd service. Use the standard systemd commands:
+
+```bash
+# Check service status
+sudo systemctl status wg-quick@wg0
+
+# Start the tunnel
+sudo systemctl start wg-quick@wg0
+
+# Stop the tunnel
+sudo systemctl stop wg-quick@wg0
+
+# Enable auto-start on boot
+sudo systemctl enable wg-quick@wg0
+
+# Disable auto-start on boot
+sudo systemctl disable wg-quick@wg0
+```
+
+<Tip>
+  If `wg show` confirms the tunnel is up but `systemctl status wg-quick@wg0` shows `inactive (dead)`, the tunnel was started manually rather than through systemd. Run `sudo systemctl enable wg-quick@wg0 && sudo systemctl start wg-quick@wg0` to hand control over to systemd so the tunnel restarts automatically after a reboot.
+</Tip>
+
+## Management panel
+
+### View panel logs
+
+<CodeGroup>
+
+```bash Backend (API)
+sudo docker logs seccion9-api --tail 50
+```
+
+```bash Frontend (web)
+sudo docker logs seccion9-web --tail 50
+```
+
+</CodeGroup>
+
+Add `-f` to either command to stream logs in real time:
+
+```bash
+sudo docker logs seccion9-api --tail 50 -f
+```
+
+### Restart the panel
+
+```bash
+cd panel/ && sudo docker compose restart
+```
+
+This restarts both the `seccion9-api` and `seccion9-web` containers without rebuilding images. The VPN tunnel is not affected.
+
+## Files to back up
+
+Back up the following files before making significant changes or migrating the server:
+
+| File / directory | Contents |
+|---|---|
+| `/etc/wireguard/wg0.conf` | Server WireGuard configuration including all registered peers |
+| `/etc/wireguard/clientes/` | Per-client `.conf` files (one per VPN user) |
+
+```bash
+# Example: archive both to a timestamped tarball
+sudo tar -czf wireguard-backup-$(date +%Y%m%d).tar.gz \
+  /etc/wireguard/wg0.conf \
+  /etc/wireguard/clientes/
+```
+
+<Warning>
+  These files contain private keys. Store backups in a secure location and restrict access. Never commit them to version control.
+</Warning>

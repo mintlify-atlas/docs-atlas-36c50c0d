@@ -1,0 +1,359 @@
+---
+title: Clients
+description: Manage WireGuard VPN clients — list, add, remove, and download configurations.
+---
+
+Client endpoints let you create and manage WireGuard peers. Each client gets a unique IP address within the VPN subnet, an auto-generated keypair, and a ready-to-use `.conf` file.
+
+<Note>
+All endpoints on this page require a valid `Authorization: Bearer <token>` header. See [Authentication](/api/authentication) if you need a token.
+</Note>
+
+---
+
+## List clients
+
+```
+GET /api/clients
+```
+
+Returns all configured VPN clients with their live connection status.
+
+### Response
+
+An array of client objects:
+
+<ResponseField name="name" type="string" required>
+  The client name as stored in the WireGuard configuration.
+</ResponseField>
+
+<ResponseField name="public_key" type="string" required>
+  The client's WireGuard public key (base64-encoded).
+</ResponseField>
+
+<ResponseField name="ip" type="string" required>
+  The VPN IP address assigned to this client (e.g. `"10.0.0.2"`).
+</ResponseField>
+
+<ResponseField name="endpoint" type="string">
+  The last known public IP and port of the client (e.g. `"203.0.113.5:51234"`). `null` if the client has never connected.
+</ResponseField>
+
+<ResponseField name="latest_handshake" type="integer" required>
+  Unix timestamp of the most recent WireGuard handshake. `0` if the client has never connected.
+</ResponseField>
+
+<ResponseField name="transfer_rx" type="integer" required>
+  Bytes received from this client since the last WireGuard restart.
+</ResponseField>
+
+<ResponseField name="transfer_tx" type="integer" required>
+  Bytes sent to this client since the last WireGuard restart.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  Connection status. One of:
+  - `"online"` — handshake occurred less than 3 minutes ago.
+  - `"inactive"` — handshake occurred more than 3 minutes ago.
+  - `"offline"` — client has never completed a handshake.
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+curl --request GET \
+  --url http://YOUR_SERVER_IP:8443/api/clients \
+  --header 'Authorization: Bearer YOUR_TOKEN'
+```
+
+</CodeGroup>
+
+```json Response
+[
+  {
+    "name": "laptop-alice",
+    "public_key": "abc123...==",
+    "ip": "10.0.0.2",
+    "endpoint": "203.0.113.5:51234",
+    "latest_handshake": 1748000000,
+    "transfer_rx": 1048576,
+    "transfer_tx": 524288,
+    "status": "online"
+  },
+  {
+    "name": "phone-bob",
+    "public_key": "xyz789...==",
+    "ip": "10.0.0.3",
+    "endpoint": null,
+    "latest_handshake": 0,
+    "transfer_rx": 0,
+    "transfer_tx": 0,
+    "status": "offline"
+  }
+]
+```
+
+---
+
+## Add a client
+
+```
+POST /api/clients
+```
+
+Creates a new WireGuard peer. The server generates a keypair, assigns a free IP from the VPN subnet, and writes the `.conf` file. The peer is activated immediately without restarting WireGuard.
+
+### Request body (JSON)
+
+<ParamField body="name" type="string" required>
+  A display name for the new client. Only alphanumeric characters, underscores (`_`), and hyphens (`-`) are kept; all other characters are stripped. Spaces are replaced with underscores. The name must be unique.
+</ParamField>
+
+### Response (`201 Created`)
+
+<ResponseField name="name" type="string" required>
+  The sanitized client name as stored in WireGuard.
+</ResponseField>
+
+<ResponseField name="ip" type="string" required>
+  The VPN IP address assigned to this client (e.g. `"10.0.0.4"`).
+</ResponseField>
+
+<ResponseField name="public_key" type="string" required>
+  The generated WireGuard public key.
+</ResponseField>
+
+<ResponseField name="config" type="string" required>
+  The full WireGuard `.conf` file text, ready to import on the client device.
+</ResponseField>
+
+<ResponseField name="config_path" type="string" required>
+  Absolute path to the `.conf` file on the server (e.g. `"/etc/wireguard/clientes/alice.conf"`).
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|------|--------|
+| `400` | Client name is invalid (empty after sanitization) or already exists. |
+| `500` | WireGuard key generation failed. |
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+curl --request POST \
+  --url http://YOUR_SERVER_IP:8443/api/clients \
+  --header 'Authorization: Bearer YOUR_TOKEN' \
+  --header 'Content-Type: application/json' \
+  --data '{"name": "laptop-alice"}'
+```
+
+</CodeGroup>
+
+```json Response (201)
+{
+  "name": "laptop-alice",
+  "ip": "10.0.0.2",
+  "public_key": "abc123...==",
+  "config": "[Interface]\nPrivateKey = ...\nAddress = 10.0.0.2/24\nDNS = 8.8.8.8\n\n[Peer]\nPublicKey = SERVER_KEY\nEndpoint = YOUR_SERVER_IP:51820\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25\n",
+  "config_path": "/etc/wireguard/clientes/laptop-alice.conf"
+}
+```
+
+<Tip>
+Use `GET /api/clients/{name}/qr` or `GET /api/clients/{name}/qr-base64` to display the config as a QR code for easy mobile onboarding.
+</Tip>
+
+---
+
+## Remove a client
+
+```
+DELETE /api/clients/{name}
+```
+
+Revokes a client's VPN access immediately. The peer is removed from the live WireGuard interface via `wg set ... remove` without requiring a service restart, and the `.conf` file is deleted from the server.
+
+### Path parameters
+
+<ParamField path="name" type="string" required>
+  The client name to remove.
+</ParamField>
+
+### Response (`200 OK`)
+
+```json
+{
+  "message": "Cliente 'laptop-alice' eliminado"
+}
+```
+
+### Errors
+
+| Code | Reason |
+|------|--------|
+| `404` | No client with the given name exists. |
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+curl --request DELETE \
+  --url http://YOUR_SERVER_IP:8443/api/clients/laptop-alice \
+  --header 'Authorization: Bearer YOUR_TOKEN'
+```
+
+</CodeGroup>
+
+---
+
+## Get client config
+
+```
+GET /api/clients/{name}/config
+```
+
+Returns the raw WireGuard `.conf` text for a client. Use this to re-download a configuration after the initial creation.
+
+### Path parameters
+
+<ParamField path="name" type="string" required>
+  The client name.
+</ParamField>
+
+### Response (`200 OK`)
+
+<ResponseField name="name" type="string" required>
+  The client name.
+</ResponseField>
+
+<ResponseField name="config" type="string" required>
+  The WireGuard configuration file contents.
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|------|--------|
+| `404` | Config file not found for the given client name. |
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+curl --request GET \
+  --url http://YOUR_SERVER_IP:8443/api/clients/laptop-alice/config \
+  --header 'Authorization: Bearer YOUR_TOKEN'
+```
+
+</CodeGroup>
+
+```json Response
+{
+  "name": "laptop-alice",
+  "config": "[Interface]\nPrivateKey = ...\nAddress = 10.0.0.2/24\nDNS = 8.8.8.8\n\n[Peer]\nPublicKey = SERVER_KEY\nEndpoint = YOUR_SERVER_IP:51820\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25\n"
+}
+```
+
+---
+
+## Get client QR code (PNG)
+
+```
+GET /api/clients/{name}/qr
+```
+
+Returns the WireGuard config as a PNG image encoded as a QR code. The response `Content-Type` is `image/png`.
+
+This is the simplest way to onboard a mobile device — open the URL in a browser or pipe the output to a file.
+
+### Path parameters
+
+<ParamField path="name" type="string" required>
+  The client name.
+</ParamField>
+
+### Errors
+
+| Code | Reason |
+|------|--------|
+| `404` | Config file not found for the given client name. |
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+# Save QR code to a file
+curl --request GET \
+  --url http://YOUR_SERVER_IP:8443/api/clients/laptop-alice/qr \
+  --header 'Authorization: Bearer YOUR_TOKEN' \
+  --output laptop-alice-qr.png
+```
+
+</CodeGroup>
+
+---
+
+## Get client QR code (base64)
+
+```
+GET /api/clients/{name}/qr-base64
+```
+
+Returns the QR code as a base64-encoded PNG data URI. Useful for embedding the image directly in web interfaces without a separate image request.
+
+### Path parameters
+
+<ParamField path="name" type="string" required>
+  The client name.
+</ParamField>
+
+### Response (`200 OK`)
+
+<ResponseField name="name" type="string" required>
+  The client name.
+</ResponseField>
+
+<ResponseField name="qr_base64" type="string" required>
+  A data URI string in the format `data:image/png;base64,<base64-encoded PNG>`. Can be used directly as an `src` attribute in an HTML `<img>` tag.
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|------|--------|
+| `404` | Config file not found for the given client name. |
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+curl --request GET \
+  --url http://YOUR_SERVER_IP:8443/api/clients/laptop-alice/qr-base64 \
+  --header 'Authorization: Bearer YOUR_TOKEN'
+```
+
+</CodeGroup>
+
+```json Response
+{
+  "name": "laptop-alice",
+  "qr_base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."
+}
+```
+
+<Tip>
+To embed the QR code in a web page, set the `qr_base64` value as the `src` of an `<img>` element:
+
+```html
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..." alt="WireGuard QR code" />
+```
+</Tip>

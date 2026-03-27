@@ -1,0 +1,162 @@
+---
+title: "Firewall configuration"
+description: "Configure UFW and your cloud provider's external firewall to allow WireGuard and management panel traffic to reach the VPN server."
+---
+
+The Seccion9 VPN server requires open ports at two layers: the OS-level firewall (UFW) and the cloud provider's external firewall. Both must be configured — UFW alone is not enough.
+
+## Required ports
+
+| Protocol | Port | Purpose |
+|---|---|---|
+| UDP | 51820 | WireGuard VPN tunnel |
+| TCP | 8443 | Web management panel |
+| TCP | 22 | SSH access |
+
+## UFW configuration
+
+The install script configures UFW automatically. To verify the current state:
+
+```bash
+sudo ufw status verbose
+```
+
+Expected output includes:
+
+```
+22/tcp                     ALLOW IN    Anywhere
+80/tcp                     ALLOW IN    Anywhere
+443/tcp                    ALLOW IN    Anywhere
+51820/udp                  ALLOW IN    Anywhere
+```
+
+If any rule is missing, add it manually:
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 51820/udp
+sudo ufw reload
+```
+
+<Warning>
+  Do not run `ufw enable` without first allowing port 22. Enabling UFW without an SSH rule will lock you out of the server.
+</Warning>
+
+## Cloud provider external firewall
+
+Providers such as Ionos, OVH, Hetzner, and AWS apply a **network-level firewall that sits above the OS**. Packets are blocked at the provider's edge before they ever reach the VPS — UFW never sees them.
+
+This is the most common cause of WireGuard handshake failures. Clients report connection timeouts, and `tcpdump` on the server shows no incoming UDP traffic on port 51820 even when the client is actively trying to connect.
+
+**Symptom in traceroute output:**
+
+```
+9    15 ms    212.227.x.x
+10     *        *        *     Request timed out   ← dropped here
+```
+
+You must open the required ports in your provider's network control panel in addition to UFW.
+
+## Provider-specific instructions
+
+<Tabs>
+  <Tab title="Ionos">
+    <Steps>
+      <Step title="Open the firewall policy editor">
+        Log in to the Ionos control panel and navigate to **Network → Firewall policies**.
+      </Step>
+      <Step title="Edit the policy assigned to your server">
+        Find the firewall policy **already assigned to the server** and click to edit it.
+
+        <Warning>
+          If you create a new policy but do not assign it to the server, it has no effect. Always edit the existing assigned policy.
+        </Warning>
+      </Step>
+      <Step title="Add the WireGuard rule">
+        Add an inbound rule with the following settings:
+
+        | Field | Value |
+        |---|---|
+        | Protocol | UDP |
+        | Port | 51820 |
+        | Source | 0.0.0.0/0 |
+        | Action | Allow |
+        | Direction | Inbound |
+      </Step>
+      <Step title="Add the management panel rule">
+        Add a second inbound rule:
+
+        | Field | Value |
+        |---|---|
+        | Protocol | TCP |
+        | Port | 8443 |
+        | Source | 0.0.0.0/0 |
+        | Action | Allow |
+        | Direction | Inbound |
+      </Step>
+      <Step title="Save and wait">
+        Save the policy and wait approximately 30 seconds for the rules to propagate.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Other providers (OVH, Hetzner, AWS)">
+    The exact UI varies by provider, but the required rules are the same:
+
+    1. Log in to your cloud provider's control panel.
+    2. Find the firewall, security group, or network ACL associated with your VPS.
+    3. Add an **inbound rule** for **UDP port 51820** from any source (`0.0.0.0/0`).
+    4. Add an **inbound rule** for **TCP port 8443** from any source (`0.0.0.0/0`).
+    5. Save the rules and allow time for propagation before testing.
+
+    <Note>
+      On AWS, these rules are set in the **Security Group** attached to your EC2 instance. On Hetzner, they are in the **Firewall** resource assigned to the server.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Verifying packets are arriving
+
+Use `tcpdump` on the server to confirm that UDP traffic on port 51820 is actually reaching the OS while a client attempts to connect:
+
+```bash
+sudo tcpdump -i ens6 udp port 51820
+```
+
+Replace `ens6` with your actual network interface name (check with `ip route | grep default`).
+
+**Interpreting the output:**
+
+| Result | Meaning |
+|---|---|
+| No output while client connects | Packets are blocked at the provider's external firewall — open the port in the cloud control panel |
+| Packets appear but no handshake completes | Packets are arriving — check WireGuard keys, `wg0.conf`, and IP forwarding |
+
+```bash
+# Example: packets are arriving
+12:34:01.123456 IP client.ip.address.xxxxx > server.ip.address.51820: UDP, length 148
+```
+
+## Quick diagnostic checklist
+
+Run through this checklist before deeper troubleshooting:
+
+```bash
+# 1. Are packets reaching the server?
+sudo tcpdump -i ens6 udp port 51820
+
+# 2. Is UFW allowing the port?
+sudo ufw status verbose
+
+# 3. Is IP forwarding active?
+cat /proc/sys/net/ipv4/ip_forward
+# Expected: 1
+
+# 4. Is the WireGuard interface up and is the client peer registered?
+sudo wg show
+```
+
+<Tip>
+  If `tcpdump` shows no packets and you have verified the UFW rule, the issue is almost always the cloud provider's external firewall. Open UDP 51820 in your provider's control panel first before investigating anything else.
+</Tip>

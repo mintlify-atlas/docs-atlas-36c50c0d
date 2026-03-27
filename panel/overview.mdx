@@ -1,0 +1,78 @@
+---
+title: Management Panel
+description: Web-based dashboard for managing WireGuard VPN clients — built with FastAPI and React, deployed via Docker Compose.
+---
+
+The Seccion9 Management Panel is a self-hosted web dashboard that lets you add, remove, and monitor WireGuard VPN clients without touching the terminal. It is accessible at `http://YOUR_IP:8443` once deployed.
+
+## Architecture
+
+The panel runs two Docker services behind an nginx reverse proxy:
+
+```
+Browser → nginx (port 8443:80)
+              ├── /          → React frontend (static files)
+              └── /api/*     → FastAPI backend (proxied to 172.17.0.1:8000)
+```
+
+| Service | Container | Network | Port |
+|---|---|---|---|
+| `seccion9-api` | FastAPI backend | host network | 8000 (internal) |
+| `seccion9-web` | React + nginx | bridge | 8443 → 80 |
+
+The backend runs with `network_mode: host` so it can execute `wg` commands directly against the host's WireGuard interface. The nginx container proxies `/api/*` requests to the Docker bridge gateway address (`172.17.0.1:8000`) to reach the backend.
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Add client" icon="user-plus">
+    Generates a WireGuard key pair, assigns the next available IP in the `10.0.0.0/24` subnet, writes the peer to `wg0.conf`, and creates a `.conf` file and QR code.
+  </Card>
+  <Card title="Remove client" icon="user-minus">
+    Immediately revokes the peer from the live WireGuard interface and removes its entry from `wg0.conf`.
+  </Card>
+  <Card title="List clients" icon="users">
+    Shows all registered peers with their VPN IP, truncated public key, and real-time connection status based on last handshake time.
+  </Card>
+  <Card title="Download config" icon="download">
+    Opens a modal with the raw `.conf` file content and an inline QR code. Download the `.conf` directly or scan the QR from a mobile device.
+  </Card>
+  <Card title="Server status" icon="server">
+    Displays public IP, WireGuard port, VPN subnet, system uptime, WireGuard service state, IP forwarding status, UFW rule for port 51820/udp, and connected peer count.
+  </Card>
+  <Card title="Interactive API docs" icon="book-open">
+    Swagger UI available at `http://YOUR_IP:8443/api/docs` — explore and call all API endpoints directly from the browser.
+  </Card>
+</CardGroup>
+
+## Client status indicators
+
+The panel calculates status in real time based on the WireGuard last-handshake timestamp:
+
+| Status | Meaning |
+|---|---|
+| **Online** | Handshake occurred within the last 3 minutes |
+| **Inactive** | Handshake exists but is older than 3 minutes |
+| **Offline** | No handshake recorded yet |
+
+The client list refreshes automatically every 15 seconds.
+
+## API endpoints
+
+All endpoints (except `/api/health`) require a Bearer JWT token obtained from the login endpoint.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/login` | Authenticate and receive a JWT token |
+| `GET` | `/api/clients` | List all clients with real-time status |
+| `POST` | `/api/clients` | Add a new client |
+| `DELETE` | `/api/clients/{name}` | Remove a client |
+| `GET` | `/api/clients/{name}/config` | Retrieve the `.conf` file content |
+| `GET` | `/api/clients/{name}/qr` | Get QR code as a PNG image |
+| `GET` | `/api/clients/{name}/qr-base64` | Get QR code as a base64 data URI |
+| `GET` | `/api/server/status` | Get server diagnostics |
+| `GET` | `/api/health` | Health check (no auth required) |
+
+<Tip>
+  The full interactive API reference is available at `http://YOUR_IP:8443/api/docs` (Swagger UI).
+</Tip>

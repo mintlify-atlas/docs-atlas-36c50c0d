@@ -1,0 +1,137 @@
+---
+title: Server status
+description: Check the health of the WireGuard service, network settings, and connected clients.
+---
+
+Two endpoints provide visibility into the server's operational state: an authenticated status endpoint with full diagnostics, and an unauthenticated health check for uptime monitoring.
+
+---
+
+## Get server status
+
+```
+GET /api/server/status
+```
+
+Returns a full diagnostic snapshot of the WireGuard server, including service state, network configuration, and connected client counts.
+
+<Note>
+This endpoint requires a valid `Authorization: Bearer <token>` header. See [Authentication](/api/authentication).
+</Note>
+
+### Response (`200 OK`)
+
+<ResponseField name="service" type="string" required>
+  The `systemctl` state of the `wg-quick@wg0` service. Typically `"active"` when WireGuard is running, or values such as `"inactive"` or `"failed"` otherwise.
+</ResponseField>
+
+<ResponseField name="ip_forwarding" type="boolean" required>
+  `true` if IPv4 forwarding is enabled (`/proc/sys/net/ipv4/ip_forward` equals `1`). Required for VPN traffic routing.
+</ResponseField>
+
+<ResponseField name="ufw_wireguard" type="boolean" required>
+  `true` if UFW has an ALLOW rule for port `51820` (the WireGuard UDP port). `false` if UFW is not installed or the rule is absent.
+</ResponseField>
+
+<ResponseField name="total_clients" type="integer" required>
+  Total number of configured WireGuard peers, regardless of connection status.
+</ResponseField>
+
+<ResponseField name="online_clients" type="integer" required>
+  Number of clients with a handshake in the last 3 minutes (status `"online"`).
+</ResponseField>
+
+<ResponseField name="server_ip" type="string" required>
+  The public IP address of the VPN server, as configured in `SERVER_PUBLIC_IP`.
+</ResponseField>
+
+<ResponseField name="server_port" type="integer" required>
+  The WireGuard UDP port (default `51820`).
+</ResponseField>
+
+<ResponseField name="vpn_subnet" type="string" required>
+  The VPN subnet in CIDR notation (e.g. `"10.0.0.0/24"`).
+</ResponseField>
+
+<ResponseField name="uptime" type="string" required>
+  Human-readable system uptime string from `uptime -p` (e.g. `"up 3 days, 4 hours, 12 minutes"`).
+</ResponseField>
+
+<ResponseField name="wg_interface" type="string" required>
+  The WireGuard network interface name (default `"wg0"`).
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+curl --request GET \
+  --url http://YOUR_SERVER_IP:8443/api/server/status \
+  --header 'Authorization: Bearer YOUR_TOKEN'
+```
+
+</CodeGroup>
+
+```json Response
+{
+  "service": "active",
+  "ip_forwarding": true,
+  "ufw_wireguard": true,
+  "total_clients": 5,
+  "online_clients": 2,
+  "server_ip": "203.0.113.10",
+  "server_port": 51820,
+  "vpn_subnet": "10.0.0.0/24",
+  "uptime": "up 3 days, 4 hours, 12 minutes",
+  "wg_interface": "wg0"
+}
+```
+
+<Warning>
+If `ip_forwarding` is `false`, VPN clients will not be able to route traffic through the server. Enable it with `echo 1 > /proc/sys/net/ipv4/ip_forward` and add `net.ipv4.ip_forward=1` to `/etc/sysctl.conf` for persistence.
+</Warning>
+
+---
+
+## Health check
+
+```
+GET /api/health
+```
+
+A lightweight liveness probe. Returns `200 OK` when the API process is running. No authentication required.
+
+Use this endpoint with uptime monitors, load balancers, or container health checks.
+
+### Response (`200 OK`)
+
+<ResponseField name="status" type="string" required>
+  Always `"ok"` when the API is running.
+</ResponseField>
+
+<ResponseField name="service" type="string" required>
+  Always `"seccion9-vpn-api"`.
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```bash curl
+curl --request GET \
+  --url http://YOUR_SERVER_IP:8443/api/health
+```
+
+</CodeGroup>
+
+```json Response
+{
+  "status": "ok",
+  "service": "seccion9-vpn-api"
+}
+```
+
+<Tip>
+This endpoint does not check WireGuard service health — only that the API process itself is responding. Use `GET /api/server/status` for a full diagnostic.
+</Tip>

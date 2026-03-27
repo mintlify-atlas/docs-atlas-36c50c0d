@@ -1,0 +1,219 @@
+---
+title: Troubleshooting
+description: Solutions to common problems encountered when deploying and operating the Seccion9 VPN server.
+---
+
+This page documents issues encountered during real deployments of Seccion9 VPN.
+
+## Quick checklist
+
+Run through this list before diving into a specific issue:
+
+```bash
+# Are UDP packets reaching the server?
+sudo tcpdump -i ens6 udp port 51820
+
+# Is the cloud provider's external firewall open?
+# (Check your provider's control panel — Ionos, OVH, Hetzner, AWS...)
+
+# Is UFW allowing the port?
+sudo ufw status
+
+# Is the client's public key registered?
+sudo wg show
+
+# Is the server's public key correct in the client config? (case-sensitive)
+
+# Is IP forwarding active?
+cat /proc/sys/net/ipv4/ip_forward
+
+# Does PostUp/PostDown use the correct network interface?
+# (ens6, eth0, enp3s0 — varies by server)
+ip route | grep default
+```
+
+## Issues
+
+<AccordionGroup>
+  <Accordion title="Handshake doesn't complete">
+    **Symptom:**
+
+    ```
+    Handshake for peer did not complete after 5 seconds, retrying (try 2)
+    ```
+
+    Work through the following steps in order.
+
+    <Steps>
+      <Step title="Check that packets are reaching the server">
+        Run this on the server while the client attempts to connect:
+
+        ```bash
+        sudo tcpdump -i ens6 udp port 51820 -v
+        ```
+
+        - **No output** — the packets are being blocked before reaching the OS. The problem is the cloud provider's external firewall or a routing issue.
+        - **Packets appear but no handshake** — packets are arriving. The problem is WireGuard configuration: keys, `wg0.conf`, or IP forwarding.
+      </Step>
+      <Step title="Open the cloud provider's external firewall">
+        Providers such as Ionos, OVH, Hetzner, and AWS apply a **network-level firewall above the OS**. UFW alone is not enough — packets are dropped at the provider's edge before the VPS ever sees them.
+
+        **Symptom in traceroute:**
+
+        ```
+        9    15 ms    212.227.x.x
+        10     *        *        *     Tiempo de espera agotado   ← dropped here
+        ```
+
+        **For Ionos:**
+        1. Go to **Network → Firewall policies** in the Ionos control panel.
+        2. Edit the policy **already assigned to the server** — do not create a new one.
+        3. Add an inbound rule: Protocol **UDP** / Port **51820** / Source **0.0.0.0/0** / Action **Allow**.
+        4. Save and wait approximately 30 seconds.
+
+        <Warning>
+          Creating a new firewall policy but not assigning it to the server has no effect.
+        </Warning>
+      </Step>
+      <Step title="Check UFW">
+        ```bash
+        sudo ufw status verbose
+        ```
+
+        The output must include `51820/udp ALLOW IN Anywhere`. If it doesn't:
+
+        ```bash
+        sudo ufw allow 51820/udp
+        sudo ufw reload
+        ```
+      </Step>
+      <Step title="Verify public keys (WireGuard is case-sensitive)">
+        WireGuard silently discards packets if the server's public key in the client config is wrong — no error message is shown.
+
+        To verify the client's private key generates the expected public key:
+
+        ```bash
+        # Run on the server
+        echo "CLIENT_PRIVATE_KEY" | wg pubkey
+        # Must match exactly what appears in: sudo wg show
+        ```
+
+        **Real case documented:** a lowercase `l` written as uppercase `L` causes the handshake to fail silently:
+
+        ```
+        # Wrong  → VNLKAg0=
+        # Correct → VNlKAg0=
+        ```
+
+        Keys are base64-encoded and case-sensitive. Copy and paste rather than typing them manually.
+      </Step>
+      <Step title="Reload WireGuard on the server">
+        ```bash
+        sudo wg-quick down wg0 && sudo wg-quick up wg0
+        sudo wg show
+        ```
+      </Step>
+    </Steps>
+  </Accordion>
+
+  <Accordion title="wg-quick.exe doesn't exist on Windows">
+    **Symptom:** Running `wg-quick` in PowerShell or Command Prompt on Windows fails — `wg-quick` does not exist as an executable on Windows.
+
+    Use one of the following alternatives instead:
+
+    <CodeGroup>
+
+    ```cmd Install as a Windows service
+    wireguard.exe /installtunnelservice "C:\Program Files\WireGuard\tunnel.conf"
+    ```
+
+    ```cmd Use the WireGuard GUI
+    wireguard.exe
+    ```
+
+    </CodeGroup>
+
+    To use the GUI: open WireGuard, click **Import tunnel from file**, select your `.conf` file, then click **Activate**.
+  </Accordion>
+
+  <Accordion title="SSH — REMOTE HOST IDENTIFICATION HAS CHANGED">
+    **Symptom:** Connecting to the server after a VM reinstall shows:
+
+    ```
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    ```
+
+    The server's SSH host key changed (because the VM was reinstalled), but your local `known_hosts` file still has the old fingerprint.
+
+    **Solution:** Remove the stale entry and reconnect:
+
+    ```cmd
+    ssh-keygen -R IP_DEL_SERVIDOR
+    ```
+
+    Then reconnect with `ssh usuario@IP` and accept the new fingerprint when prompted.
+
+    <Note>
+      Only do this when you know the server was intentionally reinstalled. If the key changed unexpectedly on a running server, investigate before accepting the new fingerprint.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Client connects but has no internet">
+    **Symptom:** The VPN tunnel establishes successfully (handshake completes, the client gets a VPN IP), but internet traffic does not pass through.
+
+    **Cause:** IP forwarding is disabled on the server. The server receives traffic from VPN clients but does not forward it to the internet.
+
+    **Solution:**
+
+    ```bash
+    # Check current state (0 = disabled, 1 = enabled)
+    cat /proc/sys/net/ipv4/ip_forward
+
+    # Enable immediately (does not survive reboot)
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+
+    # Make permanent
+    echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+    sysctl -p
+    ```
+
+    You can also verify IP forwarding status from `wg-manager.sh` option **5) Estado del servidor** or from the web panel's server status page.
+  </Accordion>
+
+  <Accordion title="WireGuard active but systemd shows inactive (dead)">
+    **Symptom:** `sudo wg show` returns interface data (the tunnel is up), but `sudo systemctl status wg-quick@wg0` shows `inactive (dead)`.
+
+    **Cause:** The tunnel was started manually with `wg-quick up wg0` rather than through systemd. The tunnel works now, but it will not restart automatically after a reboot.
+
+    **Solution:** Register and start the tunnel through systemd:
+
+    ```bash
+    sudo systemctl enable wg-quick@wg0
+    sudo systemctl start wg-quick@wg0
+    sudo systemctl status wg-quick@wg0
+    ```
+
+    After this, the tunnel starts automatically on every boot.
+  </Accordion>
+
+  <Accordion title="Detecting the correct network interface">
+    **Symptom:** VPN clients connect but cannot reach the internet, even with IP forwarding enabled. The `PostUp`/`PostDown` rules in `wg0.conf` reference the wrong network interface (for example, `ens6` when the server uses `eth0`).
+
+    **Find the correct interface:**
+
+    ```bash
+    ip route | grep default
+    # Example output: default via 212.x.x.1 dev ens6  ← ens6 is the interface
+    ```
+
+    Common interface names: `ens6`, `eth0`, `enp3s0`. The name varies by cloud provider and server configuration.
+
+    Update `wg0.conf` to use the correct interface name in the `PostUp` and `PostDown` lines, then restart the tunnel:
+
+    ```bash
+    sudo wg-quick down wg0 && sudo wg-quick up wg0
+    ```
+  </Accordion>
+</AccordionGroup>

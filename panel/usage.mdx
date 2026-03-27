@@ -1,0 +1,135 @@
+---
+title: Using the panel
+description: Day-to-day guide for managing WireGuard VPN clients through the Seccion9 Management Panel.
+---
+
+## Logging in
+
+Navigate to `http://YOUR_IP:8443` in a browser. Enter the credentials set in `docker-compose.yml` via `ADMIN_USER` and `ADMIN_PASSWORD` (defaults: `admin` / your chosen password).
+
+The session token is stored in the browser's `localStorage` and expires after 8 hours. You are automatically redirected to the login screen when the token expires.
+
+<Warning>
+  Never use the default `CAMBIAME` password in production. The deploy script blocks deployment until it is changed.
+</Warning>
+
+## Adding a client
+
+<Steps>
+  <Step title="Open the add client dialog">
+    In the **Clientes VPN** view, click **+ Añadir cliente** in the top-right corner of the clients table.
+  </Step>
+  <Step title="Enter a client name">
+    Type a name for the client (for example, `oficina-bcn` or `laptop-ana`). Press Enter or click **Añadir**.
+  </Step>
+  <Step title="Client is provisioned automatically">
+    The backend:
+    - Generates a WireGuard private/public key pair
+    - Assigns the next available IP address in `10.0.0.0/24` (starting from `.2`)
+    - Adds the peer to the live WireGuard interface and writes it to `wg0.conf`
+    - Saves a `.conf` file to `CONFIGS_DIR` (`/etc/wireguard/clientes/<name>.conf`)
+
+    The client appears immediately in the table with **Offline** status (no handshake yet).
+  </Step>
+</Steps>
+
+## Downloading a client config
+
+<Steps>
+  <Step title="Open the config modal">
+    In the clients table, click the document icon (📄) in the **Acciones** column for the client.
+  </Step>
+  <Step title="Download or scan">
+    A modal opens with two options:
+
+    <Tabs>
+      <Tab title="Download .conf file">
+        Click **Descargar .conf** to download the WireGuard configuration file as `<name>.conf`.
+
+        Transfer this file to the client device and import it into the WireGuard app.
+      </Tab>
+      <Tab title="Scan QR code">
+        The modal displays a QR code generated from the `.conf` content.
+
+        Open the WireGuard app on a mobile device and scan the QR to import the configuration without transferring any files.
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+<Tip>
+  You can also click **Copiar** to copy the raw `.conf` content to the clipboard and paste it manually.
+</Tip>
+
+## Client status indicators
+
+The panel determines each client's status from the WireGuard last-handshake timestamp, refreshing every 15 seconds.
+
+| Status | Indicator | Meaning |
+|---|---|---|
+| **Online** | Green dot (animated pulse) | Last handshake within the past 3 minutes — peer is actively connected |
+| **Inactive** | Yellow dot | Handshake recorded but older than 3 minutes — peer connected at some point but is currently idle or disconnected |
+| **Offline** | Red dot | No handshake ever recorded — peer has never successfully connected |
+
+The stats row above the table shows totals for each status at a glance.
+
+## Removing a client
+
+<Steps>
+  <Step title="Click the delete icon">
+    In the clients table, click the trash icon (🗑) in the **Acciones** column for the client you want to remove.
+  </Step>
+  <Step title="Confirm removal">
+    A confirmation dialog appears. Click **Eliminar** to confirm.
+  </Step>
+  <Step title="Access is immediately revoked">
+    The backend removes the peer from the live WireGuard interface, deletes its entry from `wg0.conf`, and removes the client's `.conf` file from `CONFIGS_DIR`. Any active connection from that client is dropped at once.
+  </Step>
+</Steps>
+
+<Warning>
+  Removing a client is immediate and cannot be undone from the panel. You would need to re-add the client (which generates new keys and a new IP) to restore access.
+</Warning>
+
+## Server status dashboard
+
+Click **Servidor** in the left sidebar to view the server diagnostics page.
+
+### Summary cards
+
+| Card | Description |
+|---|---|
+| **IP pública** | The public IP configured in `SERVER_PUBLIC_IP` — the address clients use to reach the VPN. |
+| **Puerto** | The WireGuard UDP port (`SERVER_PORT`, default `51820`). |
+| **Subred** | The VPN subnet (`VPN_SUBNET`, default `10.0.0.0/24`). |
+| **Uptime** | System uptime of the host server. |
+
+### System checks
+
+| Check | Description |
+|---|---|
+| **Servicio WireGuard** | Whether the `wg-quick@wg0` systemd service is `active`. |
+| **IP Forwarding** | Whether `/proc/sys/net/ipv4/ip_forward` is enabled — required for VPN traffic routing. |
+| **UFW (51820/udp)** | Whether UFW allows traffic on port 51820/udp for WireGuard connections. |
+| **Clientes conectados** | Number of currently online peers out of the total registered peers. |
+
+## Viewing logs
+
+<CodeGroup>
+
+```bash API log file
+# Persistent log written by the backend
+sudo tail -f /var/log/seccion9/api.log
+```
+
+```bash Backend container logs
+sudo docker logs seccion9-api --tail 50 -f
+```
+
+```bash Frontend container logs
+sudo docker logs seccion9-web --tail 50 -f
+```
+
+</CodeGroup>
+
+The API logs each login, client addition, and client removal with the acting username and a timestamp.

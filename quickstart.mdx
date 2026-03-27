@@ -1,80 +1,354 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Install the Seccion9 VPN server, deploy the management panel, and connect your first client in under 15 minutes."
 ---
 
-## Get started in three steps
+This guide walks you through a complete setup: a running WireGuard server, the web management panel, and a connected client — from a fresh Ubuntu 22.04 VPS.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, confirm you have:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- A VPS running **Ubuntu 22.04 LTS** with root access
+- The following ports open in your cloud provider's firewall panel (not just UFW):
 
-### Step 2: Deploy your changes
+| Protocol | Port | Purpose |
+|---|---|---|
+| UDP | 51820 | WireGuard VPN tunnel |
+| TCP | 8443 | Web management panel |
+| TCP | 22 | SSH access |
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Warning>
+  Many cloud providers (Ionos, OVH, Hetzner) apply an **external firewall** that blocks traffic before it reaches the OS. You must open these ports in your provider's network control panel — enabling them in UFW alone is not sufficient.
+</Warning>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Steps>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<Step title="Install the VPN server">
 
-### Step 3: Go live
+SSH into your VPS and run the server installation script as root. The script installs WireGuard, generates server key pairs, configures IP forwarding, sets up UFW rules, and starts the `wg0` interface.
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+```bash
+sudo bash server/install-server.sh
+```
+
+The script performs five steps automatically:
+
+1. Installs `wireguard`, `wireguard-tools`, and `ufw`
+2. Generates a server private/public key pair in `/etc/wireguard/`
+3. Creates `/etc/wireguard/wg0.conf` with address `10.0.0.1/24` and listen port `51820`
+4. Enables `net.ipv4.ip_forward` for packet routing
+5. Configures UFW (allows ports 22, 80, 443, 51820/udp) and starts WireGuard
+
+When the script completes, it prints your **server public key**. Copy it — you will need it when configuring the management panel and client scripts.
+
+```
+============================================
+   INSTALACION COMPLETADA
+============================================
+
+ Clave publica del servidor:
+ <YOUR_SERVER_PUBLIC_KEY>
+
+ IMPORTANTE:
+ 1. Guarda esta clave publica — la necesitan los clientes
+ 2. Abre el puerto UDP 51820 en el firewall del proveedor
+ 3. Usa add-client.sh para registrar nuevos clientes
+```
+
+Verify the interface is running:
+
+```bash
+sudo wg show
+```
+
+</Step>
+
+<Step title="Deploy the management panel">
+
+The management panel is a FastAPI backend and React frontend deployed with Docker Compose.
+
+Navigate to the `panel/` directory and open `docker-compose.yml`:
+
+```bash
+cd panel/
+nano docker-compose.yml
+```
+
+Update the following environment variables in the `backend` service:
+
+```yaml
+environment:
+  - API_HOST=0.0.0.0
+  - API_PORT=8000
+  - ADMIN_USER=admin
+  - ADMIN_PASSWORD=CAMBIAME          # Set a strong password
+  - SECRET_KEY=CAMBIAME              # Set a long random string for JWT signing
+  - SERVER_PUBLIC_IP=TU_IP_PUBLICA   # Your VPS public IP address
+  - SERVER_PUBLIC_KEY=TU_CLAVE_PUBLICA_SERVIDOR  # From step 1
+  - SERVER_PORT=51820
+  - WG_INTERFACE=wg0
+  - WG_CONF_PATH=/etc/wireguard/wg0.conf
+  - VPN_SUBNET=10.0.0
+  - CONFIGS_DIR=/etc/wireguard/clientes
+```
+
+<Warning>
+  Change `ADMIN_PASSWORD` and `SECRET_KEY` before deploying. The defaults in the file (`CAMBIAME`) are placeholders and must not be used in production.
+</Warning>
+
+Once configured, deploy the panel:
+
+```bash
+sudo bash deploy.sh
+```
+
+The frontend container exposes the dashboard on port `8443`. Open it in a browser:
+
+```
+http://YOUR_VPS_IP:8443
+```
+
+Log in with the `ADMIN_USER` and `ADMIN_PASSWORD` you set above.
+
+<Tip>
+  The interactive API documentation is available at `http://YOUR_VPS_IP:8443/api/docs` — useful for testing endpoints and exploring the REST API.
+</Tip>
+
+</Step>
+
+<Step title="Add your first client">
+
+Choose the method that best fits your workflow.
+
+<Tabs>
+  <Tab title="Web panel (recommended)">
+    1. Open the panel at `http://YOUR_VPS_IP:8443` and log in.
+    2. Click **Add client** and enter a name for the client (e.g., `laptop-alice`).
+    3. The panel generates a key pair, assigns an IP from the `10.0.0.0/24` subnet, and creates a `.conf` file.
+    4. Click **Download config** to get the `.conf` file, or click **QR code** to scan it from a mobile device.
+    5. Send the `.conf` to the end user.
+  </Tab>
+  <Tab title="Terminal script">
+    Use `add-client.sh` when you already have the client's public key and want to assign a specific IP.
+
+    ```bash
+    sudo bash onboarding/add-client.sh <name> <public_key> <assigned_ip>
+    ```
+
+    Example:
+
+    ```bash
+    sudo bash onboarding/add-client.sh alice CMvCw4gSxdv5xwkgx...= 10.0.0.2
+    ```
+
+    The script:
+    - Registers the peer immediately with `wg set` (no restart needed)
+    - Appends the `[Peer]` block to `/etc/wireguard/wg0.conf`
+    - Saves the active configuration with `wg-quick save wg0`
+    - Prints the current server status
+  </Tab>
+  <Tab title="wg-manager.sh">
+    The interactive `wg-manager.sh` script provides a menu-driven interface over SSH.
+
+    Copy it to your server and make it executable:
+
+    ```bash
+    scp wg-manager.sh root@YOUR_VPS_IP:/root/wg-manager.sh
+    chmod +x /root/wg-manager.sh
+    ```
+
+    Open the file and set `SERVER_IP` and `SERVER_PUBKEY` to your values, then run it:
+
+    ```bash
+    nano /root/wg-manager.sh
+    sudo ./wg-manager.sh
+    ```
+
+    Select option **1) Add client** from the menu:
+
+    ```
+    ╔══════════════════════════════════════╗
+    ║   SECCION9 — WireGuard Manager      ║
+    ╠══════════════════════════════════════╣
+    ║  1) Add client                       ║
+    ║  2) Remove client                    ║
+    ║  3) List clients and status          ║
+    ║  4) View client config               ║
+    ║  5) Server status                    ║
+    ║  6) Exit                             ║
+    ╚══════════════════════════════════════╝
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+
+<Step title="Configure a Windows client">
+
+Run the setup script as Administrator in PowerShell. Replace `10.0.0.2` with the IP assigned to this client.
+
+```powershell
+# Run as Administrator
+.\clients\setup-windows.ps1 -ClientAddress "10.0.0.2"
+```
+
+You can also pass the server details directly:
+
+```powershell
+.\clients\setup-windows.ps1 `
+  -ServerPublicKey "<YOUR_SERVER_PUBLIC_KEY>" `
+  -ServerEndpoint "YOUR_VPS_IP:51820" `
+  -ClientAddress "10.0.0.2" `
+  -TunnelName "tunnel-seccion9"
+```
+
+The script:
+1. Installs WireGuard for Windows if not already present
+2. Prompts for the assigned VPN IP if not passed as a parameter
+3. Generates a client key pair
+4. Writes the config to `C:\Program Files\WireGuard\tunnel-seccion9.conf`
+5. Opens the WireGuard GUI
+
+After the script runs, it prints the client's **public key**. Send this key to your administrator so they can register it on the server using one of the methods in step 3.
+
+<Note>
+  If you downloaded the `.conf` file directly from the management panel, you can skip the PowerShell script entirely. Open the WireGuard GUI, click **Import tunnel from file**, select the `.conf` file, and activate the tunnel.
+</Note>
+
+To activate the tunnel after the peer is registered on the server:
+
+1. Open the WireGuard GUI (it launches automatically after the script)
+2. Select `tunnel-seccion9`
+3. Click **Activate**
+
+</Step>
+
+<Step title="Configure a Linux client">
+
+Run the setup script as root on the client machine:
+
+```bash
+sudo bash clients/setup-linux.sh
+```
+
+The script:
+1. Installs `wireguard`, `wireguard-tools`, and `resolvconf` if not already present
+2. Prompts for the VPN IP assigned to this client
+3. Generates a client key pair
+4. Writes the config to `/etc/wireguard/seccion9.conf`
+
+After the script runs, it prints the client's **public key**. Send this to your administrator to register the peer on the server.
+
+Once registered, bring the tunnel up:
+
+```bash
+sudo wg-quick up seccion9
+```
+
+<Tip>
+  If you downloaded the `.conf` file directly from the management panel, copy it to `/etc/wireguard/` and run `sudo wg-quick up seccion9` — no need to run the setup script.
+</Tip>
+
+To bring the tunnel down:
+
+```bash
+sudo wg-quick down seccion9
+```
+
+</Step>
+
+<Step title="Verify the connection">
+
+Run these commands on the client to confirm the tunnel is up and routing traffic.
+
+<CodeGroup>
+
+```bash Linux
+# Check WireGuard status and last handshake
+sudo wg show
+
+# Ping the VPN gateway
+ping 10.0.0.1
+```
+
+```powershell Windows
+# Check WireGuard status
+& "C:\Program Files\WireGuard\wg.exe" show
+
+# Ping the VPN gateway
+ping 10.0.0.1
+```
+
+</CodeGroup>
+
+A successful handshake looks like this in `wg show` output:
+
+```
+interface: seccion9
+  public key: <client-public-key>
+  private key: (hidden)
+  listening port: ...
+
+peer: <server-public-key>
+  endpoint: YOUR_VPS_IP:51820
+  allowed ips: 0.0.0.0/0
+  latest handshake: 5 seconds ago
+  transfer: 1.23 KiB received, 4.56 KiB sent
+  persistent keepalive: every 25 seconds
+```
+
+On the server, confirm the peer is visible:
+
+```bash
+sudo wg show
+```
+
+You can also check the real-time status from the management panel at `http://YOUR_VPS_IP:8443` — the client will appear as **connected**.
+
+</Step>
+
+</Steps>
+
+## Maintenance commands
+
+Useful commands for day-to-day VPN server administration:
+
+```bash
+# View connected peers and last handshake
+sudo wg show
+
+# Restart the WireGuard tunnel
+sudo wg-quick down wg0 && sudo wg-quick up wg0
+
+# Stream WireGuard logs
+sudo journalctl -u wg-quick@wg0 -f
+
+# Remove a client manually
+sudo wg set wg0 peer <CLIENT_PUBLIC_KEY> remove
+sudo wg-quick save wg0
+
+# View panel logs
+sudo docker logs seccion9-api --tail 50
+sudo docker logs seccion9-web --tail 50
+
+# Restart the management panel
+cd panel/ && sudo docker compose restart
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Management panel" icon="display" href="/panel/overview">
+    Learn all panel features: bulk client management, QR provisioning, and server diagnostics.
+  </Card>
+  <Card title="REST API" icon="code" href="/api/overview">
+    Automate client provisioning and status checks with the JWT-authenticated API.
+  </Card>
+  <Card title="Linux client guide" icon="linux" href="/clients/linux">
+    Detailed Linux setup with systemd autostart and split-tunnel configuration.
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/operations/troubleshooting">
+    Fix handshake failures, firewall blocks, and routing issues.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

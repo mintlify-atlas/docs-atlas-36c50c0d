@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Seccion9 Secure Hub",
+  "projectType": "infrastructure",
+  "projectName": "Seccion9 Secure Hub",
+  "projectDescription": "A self-hosted enterprise VPN platform built on WireGuard and OpenVPN, with a web management panel, REST API, and automated client setup scripts for Linux and Windows.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#1E3A5F",
-    "light": "#4A90D9",
-    "dark": "#0A1E3C"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/MohamedKamil-hub/Seccion9-Secure-Hub"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/MohamedKamil-hub/Seccion9-Secure-Hub"
-    }
-  },
+  "primaryColor": "#1E3A5F",
+  "lightColor": "#4A90D9",
+  "darkColor": "#0A1E3C",
   "navigation": {
     "tabs": [
       {
@@ -84,5 +72,31 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "WireGuard VPN server setup and management on Ubuntu VPS",
+    "Web management panel (FastAPI backend + React frontend) deployed via Docker",
+    "REST API with JWT authentication for programmatic VPN management",
+    "Automated client onboarding with key generation, IP assignment, and QR code export",
+    "Support for WireGuard and OpenVPN protocols depending on client firewall",
+    "Interactive terminal manager (wg-manager.sh) for SSH-based administration",
+    "Automated client setup scripts for Linux and Windows",
+    "Zero Trust remote access for enterprise environments"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "GET /api/clients",
+    "POST /api/clients",
+    "DELETE /api/clients/{name}",
+    "GET /api/clients/{name}/config",
+    "GET /api/clients/{name}/qr",
+    "GET /api/clients/{name}/qr-base64",
+    "GET /api/server/status",
+    "GET /api/health",
+    "bash server/install-server.sh",
+    "bash onboarding/add-client.sh <name> <pubkey> <ip>",
+    "bash clients/setup-linux.sh",
+    "powershell clients/setup-windows.ps1 -ClientAddress <ip>",
+    "bash wg-manager.sh"
+  ]
 }
